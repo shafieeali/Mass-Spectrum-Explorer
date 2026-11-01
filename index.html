@@ -186,7 +186,7 @@ function buildPanel(){
   else groups.filter(function(g){return g.id===pgroup;})[0].render(box);
   var rb=document.createElement('button');rb.type='button';rb.className='btn';rb.style.marginTop='12px';rb.textContent='Reset all to defaults';
   rb.addEventListener('click',function(){APP.reset();buildPanel();update(true);});box.appendChild(rb);
-  if(APP.S)refreshEq();if(APP.tabVals)APP.tabVals();
+  if(APP.S){APP.compute();refreshEq();}if(APP.tabVals)APP.tabVals();
 }
 function tabVal(id,txt){var a=$('pv-'+id);if(a)a.textContent=txt;var b=$('gh-'+id);if(b)b.textContent=txt;}
 function setFold(c){var r=document.querySelector('.right');r.classList.toggle('collapsed',c);var f=$('fold');f.textContent=c?'▴':'▾';f.setAttribute('aria-expanded',c?'false':'true');f.setAttribute('aria-label',c?'Show the controls':'Hide the controls to enlarge the view');}
@@ -253,7 +253,7 @@ var PRESETS=[['CO','C₂H₄','CO and C₂H₄ at m/z 28'],['N2','CO','N₂ and 
   ['C2H6S','C3H6O','Ethanethiol vs acetone (³⁴S at M+2)'],['C8H10N4O2','','Caffeine'],['C27H46O','','Cholesterol'],['C4H12Si','','Tetramethylsilane (Si isotopes)'],['C10H8','C11H12','Naphthalene vs C₁₁H₁₂ (m/z 128 vs 144: different)'],['C6H12O6','','Glucose']];
 var PROT=[['8564.8','Ubiquitin (8,565 Da)'],['12360','Cytochrome c (12,360 Da)'],['14305','Lysozyme (14,305 Da)'],['16951.5','Apomyoglobin (16,951 Da)'],['29024','Carbonic anhydrase II (29,024 Da)'],['66430','Bovine serum albumin (66,430 Da)']];
 var AN={quad:{n:'Quadrupole (unit resolution)'},tof:{n:'Time-of-flight'},orbi:{n:'Orbitrap'},fticr:{n:'FT-ICR'}};
-function D0(){return {mode:'small',f1:'CO',f2:'C2H4',cmp:true,an:'tof',R:1000,M:16951.5,conf:'native',pick:[]};}
+function D0(){return {mode:'small',f1:'CO',f2:'C2H4',cmp:true,an:'tof',R:1000,M:16951.5,conf:'native',pick:[],log:false,ferr:null,cmpNote:null};}
 var S=D0(),C={};
 function Rat(m){if(S.an==='quad')return m/0.7;if(S.an==='orbi')return S.R*Math.sqrt(200/m);if(S.an==='fticr')return S.R*400/m;return S.R;}
 function fwhm(m){return m/Rat(m);}
@@ -275,7 +275,7 @@ function drawSpec(svg,sets,x0,x1,opt){
   svg.appendChild(el('line',{x1:PL,y1:H-PB,x2:W-PR,y2:H-PB,'class':'ax'}));
   svg.appendChild(el('text',{x:(PL+W-PR)/2,y:H-3,'text-anchor':'middle','class':'axt'},'m/z'));
   var N=Math.max(400,Math.round((W-PL-PR)*2)),dx=(x1-x0)/N,curves=[],gmax=0;
-  sets.forEach(function(sv){var g=new Float64Array(N+1),stick=[];sv.peaks.forEach(function(p){if(p.m<x0-1||p.m>x1+1)return;var s=fwhm(p.mz||p.m)/2.3548;if(sv.scale)s/=sv.scale;
+  sets.forEach(function(sv){var g=new Float64Array(N+1),stick=[];sv.peaks.forEach(function(p0){if(p0.m<x0-1||p0.m>x1+1)return;var p=opt.log?{m:p0.m,mz:p0.mz,r:Math.max(0,(Math.log10(Math.max(p0.r,1e-9))+5)/5)}:p0;var s=fwhm(p.mz||p.m)/2.3548;if(sv.scale)s/=sv.scale;
       if(s/dx<0.7){stick.push(p);return;}var i0=Math.max(0,Math.floor((p.m-5*s-x0)/dx)),i1=Math.min(N,Math.ceil((p.m+5*s-x0)/dx));for(var i=i0;i<=i1;i++){var z=(x0+i*dx-p.m)/s;g[i]+=p.r*Math.exp(-0.5*z*z);}});
     var gm=0;for(var i=0;i<=N;i++)gm=Math.max(gm,g[i]);stick.forEach(function(p){gm=Math.max(gm,p.r);});curves.push({g:g,stick:stick,sv:sv});gmax=Math.max(gmax,gm);});
   var sum=null;if(sets.length>1){sum=new Float64Array(N+1);curves.forEach(function(c){for(var i=0;i<=N;i++)sum[i]+=c.g[i];});for(var i=0;i<=N;i++)gmax=Math.max(gmax,sum[i]);}
@@ -294,10 +294,11 @@ APP.live=function(){
   var L=$('live');
   if(S.mode==='small'){
     if(C.err1){L.innerHTML='<div class="l1"><span class="h">'+C.err1+'</span></div>';return;}
+    var warn=S.ferr?'<div class="l2" style="color:var(--warn)"><span>Formula not valid ('+S.ferr+'); still showing '+fmtF(C.F1)+'.</span></div>':(S.cmpNote?'<div class="l2"><span>'+S.cmpNote+'</span></div>':'');
     var n=C.N1,p1=n[1]?n[1].r*100:0,p2=n[2]?n[2].r*100:0,st='',col='';
     if(C.F2){if(C.Rneed){var ok=Rat(C.mono)>=C.Rneed;st=ok?'Resolved':'Not resolved';col=ok?'var(--good)':'var(--alert)';}else{st='Different nominal mass';col='var(--muted)';}}
     L.innerHTML='<div class="l1"><span class="h">'+ionLabel(C.F1)+' '+C.mono.toFixed(4)+'</span><span class="sub">'+(C.F2?'vs '+ionLabel(C.F2)+' '+C.L2[0].m.toFixed(4):'')+'</span><span class="st" style="color:'+col+'">'+st+'</span></div>'
-      +'<div class="l2"><span>M+1: '+p1.toFixed(1)+'%</span><span>M+2: '+p2.toFixed(1)+'%</span><span>R = '+Math.round(Rat(C.mono)).toLocaleString('en-US')+' → FWHM '+sig(fwhm(C.mono),2)+'</span>'+(C.Rneed?'<span>needs R ≥ '+Math.round(C.Rneed).toLocaleString('en-US')+'</span>':'')+'</div>';
+      +'<div class="l2"><span>M+1: '+p1.toFixed(1)+'%</span><span>M+2: '+p2.toFixed(1)+'%</span><span>R = '+Math.round(Rat(C.mono)).toLocaleString('en-US')+' → FWHM '+sig(fwhm(C.mono),2)+'</span>'+(C.Rneed?'<span>needs R ≥ '+Math.round(C.Rneed).toLocaleString('en-US')+'</span>':'')+'</div>'+warn;
   }else{var t=C.top,Ri=C.P.avg;var res=Rat(t.mz)>=Ri*0.9;
     L.innerHTML='<div class="l1"><span class="h">M = '+Math.round(C.P.avg).toLocaleString('en-US')+' Da</span><span class="sub">monoisotopic '+C.P.mono.toFixed(1)+'</span><span class="st" style="color:'+(res?'var(--good)':'var(--warn)')+'">'+(res?'Isotopes resolved':'Isotopes not resolved')+'</span></div>'
       +'<div class="l2"><span>charges +'+C.series[0].z+' to +'+C.series[C.series.length-1].z+'</span><span>tallest +'+t.z+' at m/z '+t.mz.toFixed(1)+'</span><span>R = '+Math.round(Rat(t.mz)).toLocaleString('en-US')+'</span></div>';}
@@ -316,8 +317,8 @@ APP.groups=function(){
   }};
   if(S.mode==='small')return [
     {id:'mol',tab:'Molecule',title:'Molecule',render:function(b){
-      ctlSelect(b,{id:'pre',label:'Examples',options:[['','Choose an example…']].concat(PRESETS.map(function(p,i){return [String(i),p[2]];})),get:function(){return '';},set:function(v){if(v==='')return;var p=PRESETS[+v];S.f1=p[0];S.f2=p[1]||S.f2;S.cmp=!!p[1];},rebuild:true});
-      ctlText(b,{id:'f1',label:'Formula (C, H, N, O, S, P, F, Cl, Br, I, Si)',get:function(){return S.f1;},set:function(v){var r=parseF(v);if(typeof r==='string')return r;S.f1=v;},
+      ctlSelect(b,{id:'pre',label:'Examples',options:[['','Choose an example…']].concat(PRESETS.map(function(p,i){return [String(i),p[2]];})),get:function(){return '';},set:function(v){if(v==='')return;var p=PRESETS[+v];S.f1=p[0];S.f2=p[1]||S.f2;S.cmp=!!p[1];S.ferr=null;S.cmpNote=null;},rebuild:true});
+      ctlText(b,{id:'f1',label:'Formula (C, H, N, O, S, P, F, Cl, Br, I, Si)',get:function(){return S.f1;},set:function(v){var r=parseF(v);if(typeof r==='string'){S.ferr=r;APP.live();return r;}S.ferr=null;S.f1=v;S.cmpNote=null;if(S.cmp){var r2=parseF(S.f2||'');if(typeof r2!=='string'&&Math.round(isotopes(r)[0].m)!==Math.round(isotopes(r2)[0].m)){S.cmp=false;S.cmpNote='Compare switched off: '+fmtF(r2)+' has a different nominal mass.';}}},
         eq:function(){if(!C.F1)return '';var f=C.F1;return 'M+1/M ≈ 1.07%·'+R_('n<sub>C</sub>')+' + 0.37%·'+R_('n<sub>N</sub>')+' + 0.8%·'+R_('n<sub>S</sub>')+' + 4.7%·'+R_('n<sub>Si</sub>')+'<br>'+N_('≈ 1.07×'+nC(f,'C')+' + 0.37×'+nC(f,'N')+' + 0.8×'+nC(f,'S')+' + 4.7×'+nC(f,'Si')+' = '+(1.07*nC(f,'C')+0.37*nC(f,'N')+0.8*nC(f,'S')+4.7*nC(f,'Si')+0.0115*nC(f,'H')).toFixed(1)+'%; exact: '+(C.N1[1]?C.N1[1].r*100:0).toFixed(1)+'%')
           +'<br>M+2 comes mostly from '+R_('Cl')+' (+32% each), '+R_('Br')+' (+97% each), '+R_('S')+' (+4.4%), '+R_('O')+' (+0.2%) and two ¹³C'+'<br>'+N_('exact M+2: '+(C.N1[2]?C.N1[2].r*100:0).toFixed(1)+'%');}});
       ctlNote(b,'Positive radical cations (M⁺•) are shown; masses include the lost electron. Type a formula like C6H5Cl.');}},
@@ -363,17 +364,18 @@ var VIEWS=[
  },enter:function(){$('spHint').style.opacity=1;}},
  {id:'zoom',label:'Fine structure',draw:function(){if(!$('v-zoom').classList.contains('on'))return;var svg=$('zm'),ch=$('zchips');
    if(S.mode==='small'){if(C.err1){svgSize(svg);return;}var ks=C.N1.filter(function(n){return n.r>0.003&&n.k<=6;}).map(function(n){return n.k;});if(ks.indexOf(S.zk)<0)S.zk=0;
-     ch.innerHTML=ks.map(function(k){return '<button type="button" class="btn" data-k="'+k+'" aria-pressed="'+(k===S.zk)+'">'+(k?'M+'+k:'M')+'</button>';}).join('')+'<span class="lab" style="margin-left:6px">one nominal peak, zoomed in</span>';
+     ch.innerHTML=ks.map(function(k){return '<button type="button" class="btn" data-k="'+k+'" aria-pressed="'+(k===S.zk)+'">'+(k?'M+'+k:'M')+'</button>';}).join('')+'<button type="button" class="btn" id="logbtn" aria-pressed="'+S.log+'" style="margin-left:auto">Log scale</button>';
+     $('logbtn').onclick=function(){S.log=!S.log;VIEWS[1].draw();};
      ch.querySelectorAll('[data-k]').forEach(function(b){b.onclick=function(){S.zk=+b.getAttribute('data-k');VIEWS[1].draw();};});
      var base=C.L1[0].m+S.zk,inK=function(p){return Math.abs(p.m-base)<0.5;},sets=smallSets().map(function(s){var mx=0;s.peaks.forEach(function(p){if(inK(p))mx=Math.max(mx,p.r);});s.peaks=s.peaks.filter(inK);return s;});
-     var all=[];sets.forEach(function(s){s.peaks.forEach(function(p){if(p.r>0.0005)all.push(p.m);});});var lo=Math.min.apply(null,all),hi=Math.max.apply(null,all),w=Math.max(0.006,4*fwhm(base),(hi-lo)*0.25);
-     var g=drawSpec(svg,sets,lo-w,hi+w,{PT:50});legend(svg,sets,14);
+     var thr=S.log?2e-6:0.0005,all=[];sets.forEach(function(s){s.peaks.forEach(function(p){if(p.r>thr)all.push(p.m);});});var lo=Math.min.apply(null,all),hi=Math.max.apply(null,all),w=Math.max(0.006,4*fwhm(base),(hi-lo)*0.25);
+     var g=drawSpec(svg,sets,lo-w,hi+w,{PT:50,log:S.log});legend(svg,sets,14);if(S.log)svg.appendChild(el('text',{x:14,y:g.H-g.PB-6,'font-size':10.5,fill:'var(--muted)','class':'halo'},'log intensity scale (5 decades)'));
      var sp=all.slice().sort(function(a,b){return a-b;}),minGap=Infinity;for(var i=1;i<sp.length;i++)if(sp[i]-sp[i-1]>1e-5)minGap=Math.min(minGap,sp[i]-sp[i-1]);
      var resolved=fwhm(base)<minGap;
-     var lastX=-99;sets[0].peaks.slice().sort(function(a,b){return a.m-b.m;}).forEach(function(p){if(p.r<0.0015*Math.max.apply(null,sets[0].peaks.map(function(q){return q.r;})))return;var x=g.X(p.m);if(x-lastX<44)return;lastX=x;
+     var lastX=-99;sets[0].peaks.slice().sort(function(a,b){return a.m-b.m;}).forEach(function(p){if(p.r<(S.log?2e-6:0.0015*Math.max.apply(null,sets[0].peaks.map(function(q){return q.r;}))))return;var x=g.X(p.m);if(x-lastX<44)return;lastX=x;
        svg.appendChild(el('text',{x:x,y:g.PT-20,'text-anchor':'middle','font-size':10.5,fill:'var(--c0)','class':'halo'},(p.l.trim()||'all light')));svg.appendChild(el('text',{x:x,y:g.PT-8,'text-anchor':'middle','font-size':10,fill:'var(--muted)','class':'halo'},p.m.toFixed(4)));});
      svg.appendChild(el('text',{x:g.W-12,y:14,'text-anchor':'end','font-size':11,fill:resolved?'var(--good)':'var(--warn)','class':'halo'},minGap<Infinity?(resolved?'Fine structure resolved':'Needs R ≥ '+Math.round(base/minGap).toLocaleString('en-US')+' to resolve'):''));
-   }else{var zs=C.series.map(function(s){return s.z;});if(zs.indexOf(S.zz)<0)S.zz=C.top.z;
+   }else{var zs=C.series.map(function(s){return s.z;});if(zs.indexOf(S.zz)<0)S.zz=C.top.z;S.log=false;
      ch.innerHTML='<span class="lab">charge</span>'+zs.filter(function(z,i){return Math.abs(z-S.zz)<=3;}).map(function(z){return '<button type="button" class="btn" data-z="'+z+'" aria-pressed="'+(z===S.zz)+'">+'+z+'</button>';}).join('');
      ch.querySelectorAll('[data-z]').forEach(function(b){b.onclick=function(){S.zz=+b.getAttribute('data-z');VIEWS[1].draw();};});
      var z=S.zz,s=C.series.filter(function(q){return q.z===z;})[0],pk=C.P.peaks.map(function(q){return {m:(q.m+z*MH)/z,r:q.p};}),lo=pk[0].m,hi=pk[pk.length-1].m,w=(hi-lo)*0.15+2*fwhm(s.mz);
